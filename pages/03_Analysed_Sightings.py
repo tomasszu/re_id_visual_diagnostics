@@ -283,19 +283,13 @@ def main():
 
         st.image(image, caption=selected_row["sighting_id"])
 
+        # drop UI-only and calculations fields first, which is costly to keep, convert json to dict
+        metadata = selected_row.drop(
+            ["preview", "time_only", "datetime"], errors="ignore"
+        ).to_dict()
+
         st.sidebar.header("Metadata")
-        st.sidebar.json({
-            "timestamp": selected_row["timestamp_utc"],
-            "camera_id": selected_row["camera_id"],
-            "track_id": selected_row["track_id"],
-            "vehicle_id": selected_row["vehicle_id"],
-            "model": selected_row["model_name"],
-            "embedding_dim": selected_row["embedding_dim"],
-            "sighting_id": selected_row["sighting_id"],
-            "adequate_size": selected_row["adequate_size"],
-            "duplicate": selected_row["duplicate"],
-            "daytime": selected_row["daytime"],
-        })
+        st.sidebar.json(metadata)
     else:
         st.info("Select a row in the table to see image and metadata details.")
 

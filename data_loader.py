@@ -23,7 +23,7 @@ def load_day(storage: StorageBackend, day: str, model: str):
         model - model version for embeddings in Str
     '''
     prefixes = []
-    for folder in ["embeddings", "images", "sightings"]:
+    for folder in ["embeddings", "images", "sightings", "vehicle_events"]:
         if folder != "embeddings":
             prefixes.append(f"{folder}/{day}")
         else:
@@ -63,6 +63,7 @@ def load_sightings_day_index(storage: StorageBackend, day: str):
 
     return rows
 
+# this load keeps embeddings nested, purposed for multi embedding architecture (for easier analysis, one might want to flatten those)
 def load_analysis_day_index(storage: StorageBackend, day: str):
     prefix = f"analysis/{day}"
     rows = []
@@ -71,23 +72,50 @@ def load_analysis_day_index(storage: StorageBackend, day: str):
         raw = storage.get_object(obj_key)
         data = json.loads(raw)
 
-        # For now assume 1 embedding per model
-        for model_name, emb_info in data["embeddings"].items():
-            rows.append({
-                "sighting_id": data["sighting_id"],
-                "timestamp_utc": data["timestamp_utc"],
-                "timestamp_ns": data["timestamp_ns"],
-                "camera_id": data["camera_id"],
-                "track_id": data["track_id"],
-                "vehicle_id": data["vehicle_id"],
-                "image_path": data["image_path"],
-                "model_name": model_name,
-                "embedding_path": emb_info["path"],
-                "embedding_dim": emb_info["dim"],
-                "embedding_normalized": emb_info["normalized"],
-                "adequate_size": data["adequate_size"],
-                "duplicate": data["duplicate"],
-                "daytime": data["daytime"]
-            })
+        rows.append(data)   # keep everything as-is
+
+    return rows
+
+def load_vehicle_events_day(storage, day, cameras=None):
+
+    prefix = f"vehicle_events/{day.replace('-', '/')}"
+    rows = []
+
+    for obj_key in storage.list_objects(prefix):
+
+        camera_id = obj_key.split("/")[4]
+
+        if cameras and camera_id not in cameras:
+            continue
+
+        raw = storage.get_object(obj_key)
+        data = json.loads(raw)
+
+        row = {
+            "event_id": data["event_id"],
+            "camera_id": camera_id,
+
+            "start_ts": data["start_ts"],
+            "end_ts": data["end_ts"],
+            "last_seen_ts": data["last_seen_ts"],
+
+            "sighting_count": data["sighting_count"],
+            "track_count": data["track_count"],
+            "duration_sec": data["duration_sec"],
+            "embedding_variance": data.get("embedding_variance"),
+
+            "tracks": data["tracks"],
+            "sightings": data["sightings"],
+
+            "plate": data.get("plate"),
+            "plate_confidence": data.get("plate_confidence"),
+
+            "representative_image": data.get("representative_image"),
+            "track_merge_scores": data.get("track_merge_scores", {}),
+
+            "obj_key": obj_key
+        }
+
+        rows.append(row)
 
     return rows
