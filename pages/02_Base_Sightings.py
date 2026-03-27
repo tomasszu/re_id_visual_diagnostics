@@ -220,25 +220,22 @@ def main():
 
     # ---------- ROW SELECTION ----------
     if table.selection.rows:
-        st.write("Selected row:")
         selected_idx = table.selection.rows[0]
         selected_row = display_df.iloc[selected_idx]
 
         img_bytes = load_image_bytes(storage, selected_row["image_path"])
         image = Image.open(io.BytesIO(img_bytes))
 
-        st.image(image, caption=selected_row["sighting_id"])
+        st.image(image, caption=selected_row.get("sighting_id"))
+
+        # drop UI-only fields
+        metadata = selected_row.drop(
+            ["preview", "resolution", "size_kb", "time_only", "datetime"],
+            errors="ignore"
+        ).to_dict()
 
         st.sidebar.header("Metadata")
-        st.sidebar.json({
-            "timestamp": selected_row["timestamp_utc"],
-            "camera_id": selected_row["camera_id"],
-            "track_id": selected_row["track_id"],
-            "vehicle_id": selected_row["vehicle_id"],
-            "model": selected_row["model_name"],
-            "embedding_dim": selected_row["embedding_dim"],
-            "sighting_id": selected_row["sighting_id"]
-        })
+        st.sidebar.json(metadata)
     else:
         st.info("Select a row in the table to see image and metadata details.")
 

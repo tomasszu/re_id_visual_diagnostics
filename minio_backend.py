@@ -49,7 +49,7 @@ def main():
         endpoint="localhost:9000",
         access_key="minioadmin",
         secret_key="minioadmin",
-        bucket="jetson-reid",
+        bucket="reid-service",
         secure=False,
     )
 

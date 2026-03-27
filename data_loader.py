@@ -45,21 +45,9 @@ def load_sightings_day_index(storage: StorageBackend, day: str):
         raw = storage.get_object(obj_key)
         data = json.loads(raw)
 
-        # For now assume 1 embedding per model
-        for model_name, emb_info in data["embeddings"].items():
-            rows.append({
-                "sighting_id": data["sighting_id"],
-                "timestamp_utc": data["timestamp_utc"],
-                "timestamp_ns": data["timestamp_ns"],
-                "camera_id": data["camera_id"],
-                "track_id": data["track_id"],
-                "vehicle_id": data["vehicle_id"],
-                "image_path": data["image_path"],
-                "model_name": model_name,
-                "embedding_path": emb_info["path"],
-                "embedding_dim": emb_info["dim"],
-                "embedding_normalized": emb_info["normalized"]
-            })
+        data["obj_key"] = obj_key  # keep reference if needed
+
+        rows.append(data)
 
     return rows
 
