@@ -106,7 +106,8 @@ def main():
         return
 
     df = pd.DataFrame(events)
-    df["datetime"] = pd.to_datetime(df["timestamp_utc"])
+    df["start_datetime"] = pd.to_datetime(df["start_timestamp_utc"])
+    df["end_datetime"] = pd.to_datetime(df["end_timestamp_utc"])
 
     # ---------- VEHICLE ID VIEW ----------
     st.header("Vehicle IDs")
@@ -142,7 +143,7 @@ def main():
     st.header(f"Vehicle: {selected_vehicle}")
 
     vehicle_events = df[df["vehicle_id"] == selected_vehicle].copy()
-    vehicle_events = vehicle_events.sort_values("datetime")
+    vehicle_events = vehicle_events.sort_values("start_datetime")
 
     # ---------- EVENTS TABLE ----------
     event_rows = []
@@ -150,12 +151,12 @@ def main():
         rep_img = row["representative"]["image_path"]
 
         # HH:MM:SS for table display
-        time_str = row["datetime"].strftime("%H:%M:%S")
+        time_str = row["start_datetime"].strftime("%H:%M:%S")
 
         event_rows.append({
             "preview": build_preview(storage, rep_img),
             "track_id": row["track_id"],
-            "time": time_str,            
+            "start": time_str,            
             "camera_id": row["camera_id"],
             "reid_score": round(row["reid_score"], 4),
             "num_sightings": row["num_sightings"],
@@ -189,7 +190,8 @@ def main():
     st.metric("Track ID", full_event["track_id"])
     st.metric("ReID Score", round(full_event["reid_score"], 4))
     st.metric("Sightings", full_event["num_sightings"])
-    st.write("Timestamp:", full_event["datetime"])
+    st.write("Time from:", full_event["start_datetime"])
+    st.write("Time to:", full_event["end_datetime"])
 
     # ---------- SIGHTINGS ----------
     st.subheader("Sightings")
