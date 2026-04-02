@@ -143,7 +143,7 @@ def main():
     st.header(f"Vehicle: {selected_vehicle}")
 
     vehicle_events = df[df["vehicle_id"] == selected_vehicle].copy()
-    vehicle_events = vehicle_events.sort_values("start_datetime")
+    vehicle_events = vehicle_events.sort_values("end_datetime")
 
     # ---------- EVENTS TABLE ----------
     event_rows = []
