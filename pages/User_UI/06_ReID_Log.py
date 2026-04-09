@@ -38,7 +38,7 @@ def load_events(_storage, day):
     if df.empty:
         return df
 
-    df["datetime"] = pd.to_datetime(df["timestamp_utc"], errors="coerce")
+    df["datetime"] = pd.to_datetime(df["end_timestamp_utc"], errors="coerce")
     df = df.sort_values("datetime")
     df["time_str"] = df["datetime"].dt.strftime("%H:%M:%S")
 

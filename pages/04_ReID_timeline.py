@@ -41,7 +41,7 @@ def load_events(_storage, day):
     if df.empty:
         return df
 
-    df["datetime"] = pd.to_datetime(df["timestamp_utc"], errors="coerce")
+    df["datetime"] = pd.to_datetime(df["start_timestamp_utc"], errors="coerce")
     df = df.sort_values("datetime")
 
     df["time_str"] = df["datetime"].dt.strftime("%H:%M:%S")
@@ -99,25 +99,48 @@ def main():
         df = df[df["vehicle_id"] == selected_vehicle]
 
     # --- timeline ---
-    st.header("Timeline")
-
     for row in df.itertuples():
 
         rep_img = row.representative["image_path"]
         color = vehicle_color(row.vehicle_id)
 
-        col1, col2, col3, col4 = st.columns([1,2,3,2])
+        # ---------------- IMAGE HANDLING ----------------
+        # use full image for enlarge/lightbox
+        full_img_bytes = load_image_bytes(storage, rep_img)
+        full_img = Image.open(io.BytesIO(full_img_bytes))
 
-        # image
-        col1.image(preview(storage, rep_img))
+        # only resize separately for thumbnail display
+        thumb_img = full_img.copy()
+        thumb_img.thumbnail((120, 120))
+
+        col1, col2, col3, col4 = st.columns([1, 2, 3, 2])
+
+        # image:
+        # streamlit expands original passed image,
+        # therefore pass full_img + width constraint
+        col1.image(full_img)
 
         # time
         col2.markdown(f"**{row.time_str}**")
 
-        # vehicle block (colored)
+        # ---------------- SMART TEXT COLOR ----------------
+        # choose black/white text depending on brightness
+        hex_color = color.lstrip("#")
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+
+        brightness = (r * 299 + g * 587 + b * 114) / 1000
+        text_color = "black" if brightness > 150 else "white"
+
+        # vehicle block
         col3.markdown(
             f"""
-            <div style='background:{color};padding:6px;border-radius:6px;color:white'>
+            <div style='background:{color};
+                        padding:8px;
+                        border-radius:10px;
+                        color:{text_color};
+                        font-weight:bold'>
             vehicle: {row.vehicle_id[:8]}<br>
             camera: {row.camera_id}<br>
             track: {row.track_id}
@@ -126,13 +149,18 @@ def main():
             unsafe_allow_html=True
         )
 
-        # score + flags
-        if row.reid_score == 0:
+        # ---------------- SCORE / STATUS ----------------
+        is_new = (
+            pd.isna(row.reid_score)
+            or row.reid_score == 0
+        )
+
+        if is_new:
             col4.error("NEW")
         else:
             col4.success(f"{row.reid_score:.2f}")
 
-        # --- WARNINGS ---
+        # ---------------- WARNINGS ----------------
         if pd.notna(row.delta_sec) and row.gap_warning:
             st.warning(
                 f"Gap >5s: {row.delta_sec:.2f}s (vehicle {row.vehicle_id})"
@@ -140,7 +168,8 @@ def main():
 
         if pd.notna(row.prev_camera) and row.camera_jump:
             st.info(
-                f"Camera jump: {row.prev_camera} → {row.camera_id} (vehicle {row.vehicle_id})"
+                f"Camera jump: {row.prev_camera} → {row.camera_id} "
+                f"(vehicle {row.vehicle_id})"
             )
 
         st.divider()

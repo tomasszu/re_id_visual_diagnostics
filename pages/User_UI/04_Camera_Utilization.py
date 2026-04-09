@@ -26,7 +26,7 @@ def load_events(_storage, day):
     df = pd.DataFrame(rows)
 
     if not df.empty:
-        df["datetime"] = pd.to_datetime(df["timestamp_utc"])
+        df["datetime"] = pd.to_datetime(df["end_timestamp_utc"])
 
     return df
 
