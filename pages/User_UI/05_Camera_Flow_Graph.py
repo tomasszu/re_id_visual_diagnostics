@@ -3,22 +3,23 @@ import pandas as pd
 import os, json, tempfile
 import math
 import colorsys
-from dotenv import load_dotenv
+from data_loader import StorageBackend
 from minio_backend import MinioBackend
 from pyvis.network import Network
 import streamlit.components.v1 as components
 
-load_dotenv()
 
 
 # ---------------- STORAGE ----------------
-def create_storage():
+def create_storage_from_session() -> StorageBackend:
+    cfg = st.session_state["runtime_config"]
+
     return MinioBackend(
-        endpoint=os.getenv("MINIO_ENDPOINT"),
-        access_key=os.getenv("MINIO_ACCESS_KEY"),
-        secret_key=os.getenv("MINIO_SECRET_KEY"),
-        bucket=os.getenv("MINIO_BUCKET"),
-        secure=False,
+        endpoint=cfg["MINIO_ENDPOINT"],
+        access_key=cfg["MINIO_ACCESS_KEY"],
+        secret_key=cfg["MINIO_SECRET_KEY"],
+        bucket=cfg["MINIO_BUCKET"],
+        secure=cfg["MINIO_SECURE"],
     )
 
 
@@ -148,7 +149,13 @@ def render_graph(transitions):
 def main():
     st.title("Camera Flow Graph - Night Mode")
 
-    storage = create_storage()
+    storage = create_storage_from_session()
+
+    if not storage.bucket_exists():
+        st.error("Connection To MinIO failed, bucket does not exist.")
+        return
+
+    st.success("Connected to MinIO fileserver successfully.")
 
     day = st.text_input("Day (YYYY/MM/DD)", "2026/03/27")
 

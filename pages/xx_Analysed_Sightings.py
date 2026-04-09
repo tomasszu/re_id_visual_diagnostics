@@ -6,14 +6,11 @@ import base64
 
 from datetime import date, time
 from PIL import Image
-from dotenv import load_dotenv
-
 from minio_backend import MinioBackend
 from data_loader import StorageBackend, load_analysis_day_index
 
 
 # ---------------- ENV ----------------
-load_dotenv()
 
 START_DATE = date(2026, 2, 12)
 DEFAULT_DATE = date(2026, 2, 26)
@@ -21,13 +18,15 @@ TODAY = date.today()
 
 
 # ---------------- STORAGE ----------------
-def create_storage_from_env() -> StorageBackend:
+def create_storage_from_session() -> StorageBackend:
+    cfg = st.session_state["runtime_config"]
+
     return MinioBackend(
-        endpoint=os.getenv("MINIO_ENDPOINT"),
-        access_key=os.getenv("MINIO_ACCESS_KEY"),
-        secret_key=os.getenv("MINIO_SECRET_KEY"),
-        bucket=os.getenv("MINIO_BUCKET"),
-        secure=False,
+        endpoint=cfg["MINIO_ENDPOINT"],
+        access_key=cfg["MINIO_ACCESS_KEY"],
+        secret_key=cfg["MINIO_SECRET_KEY"],
+        bucket=cfg["MINIO_BUCKET"],
+        secure=cfg["MINIO_SECURE"],
     )
 
 
@@ -123,7 +122,7 @@ def apply_filters(base_df, start_time, end_time, selected_cameras, track_id_filt
 # ---------------- MAIN ----------------
 def main():
 
-    storage = create_storage_from_env()
+    storage = create_storage_from_session()
 
     if not storage.bucket_exists():
         st.error("Connection To MinIO failed, bucket does not exist.")

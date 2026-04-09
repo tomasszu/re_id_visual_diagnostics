@@ -1,5 +1,17 @@
 from minio import Minio
 from minio.error import S3Error
+import argparse
+
+
+# ---------- args ----------
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--minio_endpoint', type=str, default='localhost:9000', help='Address of the MQTT broker')
+    parser.add_argument('--minio_access_key', type=str, default="minioadmin", help='Access key for MinIO')
+    parser.add_argument('--minio_secret_key', type=str, default="minioadmin", help='Secret key for MinIO')
+    parser.add_argument('--minio_bucket', type=str, default="reid-service", help='Bucket name for MinIO')
+    parser.add_argument('--minio_secure', type=bool, default=False, help='Use secure connection for MinIO')
+    return parser.parse_args()
 
 
 class MinioBackend:
@@ -43,14 +55,14 @@ class MinioBackend:
 
 
 ## Class for testing behaviour of MinIO backend
-def main():
+def main(cons_args):
     # Adjust to your MinIO config
     backend = MinioBackend(
-        endpoint="localhost:9000",
-        access_key="minioadmin",
-        secret_key="minioadmin",
-        bucket="reid-service",
-        secure=False,
+        endpoint=cons_args.minio_endpoint,
+        access_key=cons_args.minio_access_key,
+        secret_key=cons_args.minio_secret_key,
+        bucket=cons_args.minio_bucket,
+        secure=cons_args.minio_secure,
     )
 
     try:
@@ -72,4 +84,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

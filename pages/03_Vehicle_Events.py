@@ -3,21 +3,21 @@ import pandas as pd
 import os, io, json, base64
 
 from PIL import Image
-from dotenv import load_dotenv
-
+from data_loader import StorageBackend
 from minio_backend import MinioBackend
 
-load_dotenv()
 
 
 # ---------------- STORAGE ----------------
-def create_storage():
+def create_storage_from_session() -> StorageBackend:
+    cfg = st.session_state["runtime_config"]
+
     return MinioBackend(
-        endpoint=os.getenv("MINIO_ENDPOINT"),
-        access_key=os.getenv("MINIO_ACCESS_KEY"),
-        secret_key=os.getenv("MINIO_SECRET_KEY"),
-        bucket=os.getenv("MINIO_BUCKET"),
-        secure=False,
+        endpoint=cfg["MINIO_ENDPOINT"],
+        access_key=cfg["MINIO_ACCESS_KEY"],
+        secret_key=cfg["MINIO_SECRET_KEY"],
+        bucket=cfg["MINIO_BUCKET"],
+        secure=cfg["MINIO_SECURE"],
     )
 
 
@@ -86,11 +86,13 @@ def load_event_sightings(_storage, sighting_keys):
 def main():
     st.title("Vehicle ReID Inspector")
 
-    storage = create_storage()
+    storage = create_storage_from_session()
 
     if not storage.bucket_exists():
-        st.error("MinIO connection failed")
+        st.error("Connection To MinIO failed, bucket does not exist.")
         return
+
+    st.success("Connected to MinIO fileserver successfully.")
 
     # ---------- SELECT DAY ----------
     days = discover_days(storage)
@@ -116,18 +118,31 @@ def main():
 
     vehicle_rows = []
     for vid, group in vehicle_groups:
+        group = group.sort_values("end_datetime")
         rep = group.iloc[0]["representative"]["image_path"]
+
+        first_seen = group.iloc[0]["start_datetime"]
+        last_seen = group.iloc[-1]["end_datetime"]
 
         vehicle_rows.append({
             "vehicle_id": vid,
             "num_events": len(group),
-            "preview": build_preview(storage, rep)
+            "first_seen": first_seen.strftime("%H:%M:%S"),
+            "last_seen": last_seen.strftime("%H:%M:%S"),
+            "preview": build_preview(storage, rep),
+            "_sort_last_seen": last_seen,   # helper column for sorting
         })
 
     vehicle_df = pd.DataFrame(vehicle_rows)
 
+    # sort by most recently active vehicles
+    vehicle_df = vehicle_df.sort_values(
+        "_sort_last_seen",
+        ascending=False
+    ).drop(columns="_sort_last_seen")
+
     vehicle_table = st.dataframe(
-        vehicle_df[["preview", "vehicle_id", "num_events"]],
+        vehicle_df[["preview", "vehicle_id", "num_events", "first_seen", "last_seen"]],
         column_config={"preview": st.column_config.ImageColumn()},
         selection_mode="single-row",
         on_select="rerun",

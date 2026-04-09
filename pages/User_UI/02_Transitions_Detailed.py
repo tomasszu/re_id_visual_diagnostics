@@ -1,19 +1,20 @@
 import streamlit as st
 import pandas as pd
 import os, json
-from dotenv import load_dotenv
+from data_loader import StorageBackend
 from minio_backend import MinioBackend
 
-load_dotenv()
 
+# ---------------- STORAGE ----------------
+def create_storage_from_session() -> StorageBackend:
+    cfg = st.session_state["runtime_config"]
 
-def create_storage():
     return MinioBackend(
-        endpoint=os.getenv("MINIO_ENDPOINT"),
-        access_key=os.getenv("MINIO_ACCESS_KEY"),
-        secret_key=os.getenv("MINIO_SECRET_KEY"),
-        bucket=os.getenv("MINIO_BUCKET"),
-        secure=False,
+        endpoint=cfg["MINIO_ENDPOINT"],
+        access_key=cfg["MINIO_ACCESS_KEY"],
+        secret_key=cfg["MINIO_SECRET_KEY"],
+        bucket=cfg["MINIO_BUCKET"],
+        secure=cfg["MINIO_SECURE"],
     )
 
 
@@ -63,7 +64,13 @@ def build_transitions(df, min_score=0.0, max_gap=None):
 def main():
     st.title("Detailed Transitions")
 
-    storage = create_storage()
+    storage = create_storage_from_session()
+
+    if not storage.bucket_exists():
+        st.error("Connection To MinIO failed, bucket does not exist.")
+        return
+
+    st.success("Connected to MinIO fileserver successfully.")
     day = st.text_input("Day", "2026/03/27")
 
     df = load_events(storage, day)
