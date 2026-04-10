@@ -22,6 +22,15 @@ def create_storage_from_session() -> StorageBackend:
         secure=cfg["MINIO_SECURE"],
     )
 
+# ---------------- DISCOVERY ----------------
+@st.cache_data
+def discover_days(_storage):
+    days = set()
+    for key in _storage.list_objects("vehicle_events/"):
+        parts = key.split("/")
+        if len(parts) >= 4:
+            days.add(f"{parts[1]}/{parts[2]}/{parts[3]}")
+    return sorted(days, reverse=True)
 
 # ---------------- LOAD ----------------
 @st.cache_data
@@ -157,9 +166,15 @@ def main():
 
     st.success("Connected to MinIO fileserver successfully.")
 
-    day = st.text_input("Day (YYYY/MM/DD)", "2026/03/27")
+    # ---------- SELECT DAY ----------
+    days = discover_days(storage)
+    if not days:
+        st.warning("No vehicle events found")
+        return
 
-    df = load_events(storage, day)
+    selected_day = st.selectbox("Select day", days)
+
+    df = load_events(storage, selected_day)
 
     if df.empty:
         st.warning("No events")

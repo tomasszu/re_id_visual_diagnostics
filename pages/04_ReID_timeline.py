@@ -4,6 +4,7 @@ import os, io, json, base64, hashlib
 from PIL import Image
 from data_loader import StorageBackend
 from minio_backend import MinioBackend
+from datetime import time
 
 GAP_WARNING_THRESHOLD_SEC = 10
 
@@ -27,6 +28,17 @@ def vehicle_color(vehicle_id: str):
     h = hashlib.md5(vehicle_id.encode()).hexdigest()
     return f"#{h[:6]}"
 
+# ---------------- DISCOVERY ----------------
+@st.cache_data
+def discover_days(_storage):
+    days = set()
+    for key in _storage.list_objects("vehicle_events/"):
+        parts = key.split("/")
+        if len(parts) >= 4:
+            days.add(f"{parts[1]}/{parts[2]}/{parts[3]}")
+    return sorted(days, reverse=True)
+
+
 
 # ---------------- LOAD ----------------
 @st.cache_data
@@ -46,7 +58,7 @@ def load_events(_storage, day):
     if df.empty:
         return df
 
-    df["datetime"] = pd.to_datetime(df["start_timestamp_utc"], errors="coerce")
+    df["datetime"] = pd.to_datetime(df["end_timestamp_utc"], errors="coerce")
     df = df.sort_values(["vehicle_id", "datetime"]).reset_index(drop=True)
 
     df["time_str"] = df["datetime"].dt.strftime("%H:%M:%S")
@@ -66,9 +78,23 @@ def load_events(_storage, day):
         (df["camera_id"] != df["prev_camera"])
     )
 
-    df["is_first"] = df.groupby("vehicle_id").cumcount() == 0
+    df["is_new"] = df["reid_score"].isna() | (df["reid_score"] == 0)
+
+    df = df.groupby("vehicle_id", group_keys=False).apply(fix_group)
 
     return df
+
+def fix_group(g):
+    if g["is_new"].sum() == 0:
+        # fallback: pick earliest finalized or earliest row
+        idx = g.index[0]
+        g.loc[idx, "is_new"] = True
+    elif g["is_new"].sum() > 1:
+        # keep only first
+        first_idx = g[g["is_new"]].index[0]
+        g["is_new"] = False
+        g.loc[first_idx, "is_new"] = True
+    return g
 
 
 # ---------------- IMAGE ----------------
@@ -103,19 +129,70 @@ def main():
 
     st.success("Connected to MinIO fileserver successfully.")
 
-    day = st.text_input("Day (YYYY/MM/DD)", "2026/03/27")
+    # ---------- SELECT DAY ----------
+    days = discover_days(storage)
+    if not days:
+        st.warning("No vehicle events found")
+        return
 
-    df = load_events(storage, day)
+    selected_day = st.selectbox("Select day", days)
+
+    df = load_events(storage, selected_day)
 
     if df.empty:
         st.warning("No events")
         return
 
-    # --- optional filter ---
-    selected_vehicle = st.text_input("Filter by vehicle_id (optional)")
+    # ---------- SIDEBAR FILTERS ----------
+    st.sidebar.header("Filters")
 
-    if selected_vehicle:
-        df = df[df["vehicle_id"] == selected_vehicle]
+    # --- vehicle id ---
+    vehicle_input = st.sidebar.text_input("Vehicle ID (exact match)")
+
+    # --- time of day ---
+    time_range = st.sidebar.slider(
+        "Time of day",
+        value=(time(0, 0), time(23, 59)),
+        format="HH:mm"
+    )
+    start_time, end_time = time_range
+
+    # --- daytime filter ---
+    daytime_filter = st.sidebar.selectbox(
+        "Daytime filter",
+        options=["All", "True", "False"],
+        index=0
+    )
+
+    # ---------- APPLY FILTERS ----------
+
+    # vehicle id
+    if vehicle_input:
+        df = df[df["vehicle_id"].str.contains(vehicle_input, case=False, na=False)]
+
+    # time filter
+    df["time_only"] = df["datetime"].dt.time
+
+    if start_time <= end_time:
+        df = df[
+            (df["time_only"] >= start_time) &
+            (df["time_only"] <= end_time)
+        ]
+    else:
+        # overnight case
+        df = df[
+            (df["time_only"] >= start_time) |
+            (df["time_only"] <= end_time)
+        ]
+
+    # safe fallback
+    if "daytime" not in df.columns:
+        df["daytime"] = None
+
+    if daytime_filter == "Daytime":
+        df = df[df["daytime"] == True]
+    elif daytime_filter == "Nighttime":
+        df = df[df["daytime"] == False]
 
     df = df.sort_values("datetime", ascending=True).reset_index(drop=True)
 
@@ -171,7 +248,7 @@ def main():
         )
 
         # ---------------- SCORE / STATUS ----------------
-        is_new = row.is_first
+        is_new = row.is_new
 
         if is_new:
             col4.error("NEW")
