@@ -5,6 +5,8 @@ from PIL import Image
 from data_loader import StorageBackend
 from minio_backend import MinioBackend
 
+GAP_WARNING_THRESHOLD_SEC = 10
+
 
 
 # ---------------- STORAGE ----------------
@@ -32,7 +34,9 @@ def load_events(_storage, day):
     prefix = f"vehicle_events/{day}"
     rows = []
 
-    for key in _storage.list_objects(prefix):
+    keys = sorted(_storage.list_objects(prefix))
+
+    for key in keys:
         raw = _storage.get_object(key)
         data = json.loads(raw)
         rows.append(data)
@@ -43,18 +47,26 @@ def load_events(_storage, day):
         return df
 
     df["datetime"] = pd.to_datetime(df["start_timestamp_utc"], errors="coerce")
-    df = df.sort_values("datetime")
+    df = df.sort_values(["vehicle_id", "datetime"]).reset_index(drop=True)
 
     df["time_str"] = df["datetime"].dt.strftime("%H:%M:%S")
 
     # --- GAP LOGIC ---
     df["prev_time"] = df.groupby("vehicle_id")["datetime"].shift(1)
     df["delta_sec"] = (df["datetime"] - df["prev_time"]).dt.total_seconds()
-    df["gap_warning"] = df["delta_sec"] > 5
+    df["gap_warning"] = (
+        df["prev_time"].notna() &
+        (df["delta_sec"] > GAP_WARNING_THRESHOLD_SEC)
+    )
 
     # --- CAMERA JUMP ---
     df["prev_camera"] = df.groupby("vehicle_id")["camera_id"].shift(1)
-    df["camera_jump"] = df["camera_id"] != df["prev_camera"]
+    df["camera_jump"] = (
+        df["prev_camera"].notna() &
+        (df["camera_id"] != df["prev_camera"])
+    )
+
+    df["is_first"] = df.groupby("vehicle_id").cumcount() == 0
 
     return df
 
@@ -104,6 +116,8 @@ def main():
 
     if selected_vehicle:
         df = df[df["vehicle_id"] == selected_vehicle]
+
+    df = df.sort_values("datetime", ascending=True).reset_index(drop=True)
 
     # --- timeline ---
     for row in df.itertuples():
@@ -157,10 +171,7 @@ def main():
         )
 
         # ---------------- SCORE / STATUS ----------------
-        is_new = (
-            pd.isna(row.reid_score)
-            or row.reid_score == 0
-        )
+        is_new = row.is_first
 
         if is_new:
             col4.error("NEW")
@@ -170,7 +181,7 @@ def main():
         # ---------------- WARNINGS ----------------
         if pd.notna(row.delta_sec) and row.gap_warning:
             st.warning(
-                f"Gap >5s: {row.delta_sec:.2f}s (vehicle {row.vehicle_id})"
+                f"Gap >{GAP_WARNING_THRESHOLD_SEC}s: {row.delta_sec:.2f}s (vehicle {row.vehicle_id})"
             )
 
         if pd.notna(row.prev_camera) and row.camera_jump:
