@@ -5,6 +5,9 @@ import os, io, json, base64
 from PIL import Image
 from data_loader import StorageBackend
 from minio_backend import MinioBackend
+from datetime import date
+
+
 
 
 
@@ -25,11 +28,17 @@ def create_storage_from_session() -> StorageBackend:
 @st.cache_data
 def discover_days(_storage):
     days = set()
+
     for key in _storage.list_objects("vehicle_events/"):
         parts = key.split("/")
         if len(parts) >= 4:
-            days.add(f"{parts[1]}/{parts[2]}/{parts[3]}")
-    return sorted(days, reverse=True)
+            try:
+                y, m, d = int(parts[1]), int(parts[2]), int(parts[3])
+                days.add(date(y, m, d))
+            except:
+                continue
+
+    return sorted(days)
 
 
 @st.cache_data
@@ -43,7 +52,15 @@ def load_events(_storage, day):
         data["obj_key"] = key
         events.append(data)
 
-    return events
+    if not events:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(events)
+
+    df["start_datetime"] = pd.to_datetime(df["start_timestamp_utc"], errors="coerce")
+    df["end_datetime"] = pd.to_datetime(df["end_timestamp_utc"], errors="coerce")
+
+    return df
 
 
 # ---------------- IMAGE ----------------
@@ -94,22 +111,47 @@ def main():
 
     st.success("Connected to MinIO fileserver successfully.")
 
-    # ---------- SELECT DAY ----------
-    days = discover_days(storage)
-    if not days:
+    # ---------- AVAILABLE DAYS ----------
+    available_days = discover_days(storage)
+
+    if not available_days:
         st.warning("No vehicle events found")
         return
 
-    selected_day = st.selectbox("Select day", days)
+    min_date = min(available_days)
+    max_date = max(available_days)
 
-    events = load_events(storage, selected_day)
-    if not events:
-        st.warning("No events")
+    selected_date = st.date_input(
+        "Select date",
+        value=max_date,
+        min_value=min_date,
+        max_value=max_date
+    )
+
+    available_days_set = set(available_days)
+
+    if selected_date not in available_days_set:
+        st.warning("No data for selected date")
         return
 
-    df = pd.DataFrame(events)
+    # ---------- LOAD ----------
+    day_str = selected_date.strftime("%Y/%m/%d")
+
+    day_str = selected_date.strftime("%Y/%m/%d")
+
+    df = load_events(storage, day_str)
+
+    if df.empty:
+        st.warning("No events found")
+        return
+
     df["start_datetime"] = pd.to_datetime(df["start_timestamp_utc"])
     df["end_datetime"] = pd.to_datetime(df["end_timestamp_utc"])
+
+    # ---------- SIDEBAR ----------
+
+    st.sidebar.markdown("### Available dates")
+    st.sidebar.write([d.strftime("%Y-%m-%d") for d in available_days[:10]])
 
     # ---------- VEHICLE ID VIEW ----------
     st.header("Vehicle IDs")
@@ -173,7 +215,11 @@ def main():
             "track_id": row["track_id"],
             "start": time_str,            
             "camera_id": row["camera_id"],
-            "reid_score": round(row["reid_score"], 4),
+            "reid_score": (
+                round(row["reid_score"], 4)
+                if pd.notna(row.get("reid_score", None))
+                else None
+            ),
             "num_sightings": row["num_sightings"],
             "event_id": row["vehicle_event_id"]
             
@@ -211,7 +257,7 @@ def main():
     # ---------- SIGHTINGS ----------
     st.subheader("Sightings")
 
-    sightings = load_event_sightings(storage, full_event["sightings"])
+    sightings = load_event_sightings(storage, full_event.get("sightings", []))
 
     if not sightings:
         st.warning("No sightings found")
