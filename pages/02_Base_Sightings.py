@@ -29,6 +29,22 @@ def create_storage_from_session() -> StorageBackend:
         secure=cfg["MINIO_SECURE"],
     )
 
+# ---------------- DISCOVERY ----------------
+@st.cache_data
+def discover_days(_storage):
+    days = set()
+
+    for key in _storage.list_objects("sightings/"):
+        parts = key.split("/")
+        if len(parts) >= 4:
+            try:
+                y, m, d = int(parts[1]), int(parts[2]), int(parts[3])
+                days.add(date(y, m, d))
+            except:
+                continue
+
+    return sorted(days)
+
 
 # ---------------- DATA LOADING ----------------
 @st.cache_data
@@ -113,17 +129,33 @@ def main():
 
     st.title("Vehicle Sighting Inspector v0.1")
 
-    # ---------- DATE ----------
+    # ---------- AVAILABLE DAYS ----------
+    available_days = discover_days(storage)
+
+    if not available_days:
+        st.warning("No vehicle events found")
+        return
+
+    min_date = min(available_days)
+    max_date = max(available_days)
+
     selected_date = st.date_input(
         "Select date",
-        value=DEFAULT_DATE,
-        min_value=START_DATE,
-        max_value=TODAY
+        value=max_date,
+        min_value=min_date,
+        max_value=max_date
     )
+
+    available_days_set = set(available_days)
+
+    if selected_date not in available_days_set:
+        st.warning("No data for selected date")
+        return
+
+    # ---------- LOAD DAY ----------
 
     day_str = selected_date.strftime("%Y/%m/%d")
 
-    # ---------- LOAD DAY ----------
     if st.button("Load Day"):
         base_df = build_dataframe(storage, day_str)
         st.session_state["base_df"] = base_df

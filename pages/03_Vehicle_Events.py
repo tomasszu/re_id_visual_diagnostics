@@ -1,14 +1,14 @@
 import streamlit as st
+st.set_page_config(layout="wide")  # ---------- WIDE LAYOUT ----------
+
 import pandas as pd
 import os, io, json, base64
+import numpy as np
 
 from PIL import Image
 from data_loader import StorageBackend
 from minio_backend import MinioBackend
 from datetime import date
-
-
-
 
 
 # ---------------- STORAGE ----------------
@@ -41,16 +41,34 @@ def discover_days(_storage):
     return sorted(days)
 
 
+# ---------------- LOAD ----------------
 @st.cache_data
 def load_events(_storage, day):
-    prefix = f"vehicle_events/{day}"
+    """
+    If enriched_events exist → use them
+    else fallback to vehicle_events
+    """
+    enriched_prefix = f"enriched_events/{day}"
+    base_prefix = f"vehicle_events/{day}"
+
+    # --- detect enriched existence ---
+    enriched_keys = list(_storage.list_objects(enriched_prefix))
+
+    if len(enriched_keys) > 0:
+        prefix = enriched_prefix
+    else:
+        prefix = base_prefix
+
     events = []
 
     for key in _storage.list_objects(prefix):
-        raw = _storage.get_object(key)
-        data = json.loads(raw)
-        data["obj_key"] = key
-        events.append(data)
+        try:
+            raw = _storage.get_object(key)
+            data = json.loads(raw)
+            data["obj_key"] = key
+            events.append(data)
+        except:
+            continue
 
     if not events:
         return pd.DataFrame()
@@ -128,15 +146,11 @@ def main():
         max_value=max_date
     )
 
-    available_days_set = set(available_days)
-
-    if selected_date not in available_days_set:
+    if selected_date not in set(available_days):
         st.warning("No data for selected date")
         return
 
     # ---------- LOAD ----------
-    day_str = selected_date.strftime("%Y/%m/%d")
-
     day_str = selected_date.strftime("%Y/%m/%d")
 
     df = load_events(storage, day_str)
@@ -145,11 +159,7 @@ def main():
         st.warning("No events found")
         return
 
-    df["start_datetime"] = pd.to_datetime(df["start_timestamp_utc"])
-    df["end_datetime"] = pd.to_datetime(df["end_timestamp_utc"])
-
     # ---------- SIDEBAR ----------
-
     st.sidebar.markdown("### Available dates")
     st.sidebar.write([d.strftime("%Y-%m-%d") for d in available_days[:10]])
 
@@ -161,6 +171,7 @@ def main():
     vehicle_rows = []
     for vid, group in vehicle_groups:
         group = group.sort_values("end_datetime")
+
         rep = group.iloc[0]["representative"]["image_path"]
 
         first_seen = group.iloc[0]["start_datetime"]
@@ -172,12 +183,11 @@ def main():
             "first_seen": first_seen.strftime("%H:%M:%S"),
             "last_seen": last_seen.strftime("%H:%M:%S"),
             "preview": build_preview(storage, rep),
-            "_sort_last_seen": last_seen,   # helper column for sorting
+            "_sort_last_seen": last_seen,
         })
 
     vehicle_df = pd.DataFrame(vehicle_rows)
 
-    # sort by most recently active vehicles
     vehicle_df = vehicle_df.sort_values(
         "_sort_last_seen",
         ascending=False
@@ -191,11 +201,12 @@ def main():
         use_container_width=True
     )
 
-    # ---------- SELECT VEHICLE ----------
     if not vehicle_table.selection.rows:
         return
 
-    selected_vehicle = vehicle_df.iloc[vehicle_table.selection.rows[0]]["vehicle_id"]
+    selected_vehicle = vehicle_df.iloc[
+        vehicle_table.selection.rows[0]
+    ]["vehicle_id"]
 
     st.header(f"Vehicle: {selected_vehicle}")
 
@@ -204,25 +215,30 @@ def main():
 
     # ---------- EVENTS TABLE ----------
     event_rows = []
+
     for _, row in vehicle_events.iterrows():
         rep_img = row["representative"]["image_path"]
 
-        # HH:MM:SS for table display
-        time_str = row["start_datetime"].strftime("%H:%M:%S")
+        lpr = row.get("LPR") or {}
 
         event_rows.append({
             "preview": build_preview(storage, rep_img),
             "track_id": row["track_id"],
-            "start": time_str,            
+            "start": row["start_datetime"].strftime("%H:%M:%S"),
             "camera_id": row["camera_id"],
             "reid_score": (
                 round(row["reid_score"], 4)
-                if pd.notna(row.get("reid_score", None))
+                if pd.notna(row.get("reid_score"))
+                else None
+            ),
+            "plate": lpr.get("plate"),
+            "lpr_conf": (
+                round(lpr.get("confidence"), 3)
+                if lpr.get("confidence") is not None
                 else None
             ),
             "num_sightings": row["num_sightings"],
             "event_id": row["vehicle_event_id"]
-            
         })
 
     events_df = pd.DataFrame(event_rows)
@@ -235,7 +251,6 @@ def main():
         use_container_width=True
     )
 
-    # ---------- SELECT EVENT ----------
     if not event_table.selection.rows:
         return
 
@@ -245,14 +260,30 @@ def main():
         vehicle_events["vehicle_event_id"] == selected_event["event_id"]
     ].iloc[0]
 
+    # ---------- EVENT DETAIL ----------
     st.header(f"Event {selected_event['event_id']}")
 
-    # Show full timestamp in drilldown
     st.metric("Track ID", full_event["track_id"])
     st.metric("ReID Score", round(full_event["reid_score"], 4))
     st.metric("Sightings", full_event["num_sightings"])
+
     st.write("Time from:", full_event["start_datetime"])
     st.write("Time to:", full_event["end_datetime"])
+
+    # ---------- LPR DETAIL ----------
+    lpr = full_event.get("LPR")
+
+    if lpr:
+        st.subheader("License Plate Recognition")
+
+        st.metric("Plate", lpr.get("plate", "N/A"))
+        st.metric("Confidence", f"{lpr.get('confidence', 0):.4f}")
+        st.write("Status:", lpr.get("status"))
+
+        st.write("Character confidences:")
+        st.write(lpr.get("char_scores", []))
+    else:
+        st.info("No LPR data available")
 
     # ---------- SIGHTINGS ----------
     st.subheader("Sightings")
