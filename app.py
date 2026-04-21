@@ -44,7 +44,8 @@ def main():
         st.Page("pages/User_UI/06_ReID_Log.py", title="Re-identification log", icon=":material/search:"),
         st.Page("pages/gt_creation/01_ground_truth_assignment_lite.py", title="Ground Truth Assignment Visual (Lite)", icon=":material/assignment:"),
         st.Page("pages/gt_creation/02_ground_truth_assignment_full.py", title="Ground Truth Assignment Table (Full)", icon=":material/assignment:"),
-        st.Page("pages/gt_creation/03_gt_consistency.py", title="GT Consistency", icon=":material/assignment:")
+        st.Page("pages/gt_creation/03_gt_consistency.py", title="GT Consistency", icon=":material/sync:"),
+        st.Page("pages/gt_creation/04_gt_merge.py", title="GT Merge", icon=":material/merge:")
     ])
     pg.run()
 
