@@ -41,7 +41,10 @@ def main():
         st.Page("pages/User_UI/03_Exit_Analysis.py", title="Camera exit analysis", icon=":material/search:"),
         st.Page("pages/User_UI/04_Camera_Utilization.py", title="Camera Utilization", icon=":material/search:"),
         st.Page("pages/User_UI/05_Camera_Flow_Graph.py", title="Camera Flow graph", icon=":material/search:"),
-        st.Page("pages/User_UI/06_ReID_Log.py", title="Re-identification log", icon=":material/search:")
+        st.Page("pages/User_UI/06_ReID_Log.py", title="Re-identification log", icon=":material/search:"),
+        st.Page("pages/gt_creation/01_ground_truth_assignment_lite.py", title="Ground Truth Assignment Visual (Lite)", icon=":material/assignment:"),
+        st.Page("pages/gt_creation/02_ground_truth_assignment_full.py", title="Ground Truth Assignment Table (Full)", icon=":material/assignment:"),
+        st.Page("pages/gt_creation/03_gt_consistency.py", title="GT Consistency", icon=":material/assignment:")
     ])
     pg.run()
 

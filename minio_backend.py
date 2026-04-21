@@ -1,3 +1,5 @@
+import io
+
 from minio import Minio
 from minio.error import S3Error
 import argparse
@@ -52,6 +54,15 @@ class MinioBackend:
 
     def bucket_exists(self) -> bool:
         return self.client.bucket_exists(self.bucket)
+    
+    def put_object(self, key: str, data: bytes):
+        self.client.put_object(
+            bucket_name=self.bucket,
+            object_name=key,
+            data=io.BytesIO(data),
+            length=len(data),
+            content_type="application/json",
+        )
 
 
 ## Class for testing behaviour of MinIO backend

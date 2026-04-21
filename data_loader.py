@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
+import io
 from typing import Iterable
 import json
+import numpy as np
 
 class StorageBackend(ABC):
     @abstractmethod
@@ -107,3 +109,13 @@ def load_vehicle_events_day(storage, day, cameras=None):
         rows.append(row)
 
     return rows
+
+
+# ---------- LOAD EMBEDDING ----------
+def load_embedding(storage, emb_info):
+    try:
+        path = emb_info["path"]
+        raw = storage.get_object(path)
+        return np.load(io.BytesIO(raw))
+    except:
+        return None
