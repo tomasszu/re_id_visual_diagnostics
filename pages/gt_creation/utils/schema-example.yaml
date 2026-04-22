@@ -1,0 +1,18 @@
+{
+    "vehicle_event_id": str,
+    "vehicle_id": str,
+    "camera_id": str,
+    "start_timestamp_utc": str,
+
+    "start_datetime": datetime,
+
+    "ground_truth": dict,
+    "gt_vehicle_id": Optional[str],
+    "is_assigned": bool,
+
+    "LPR": dict,
+    "representative": dict,
+    "embedding": dict,
+
+    "obj_key": str
+}

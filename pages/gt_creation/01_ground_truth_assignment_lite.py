@@ -2,96 +2,18 @@ import streamlit as st
 st.set_page_config(layout="wide")
 
 import pandas as pd
-import io, json
-from datetime import date
-from PIL import Image
 
-from data_loader import load_embedding
-from minio_backend import MinioBackend
-from ground_truth import (
-    assign_event_to_gt,
-    create_new_gt_id,
-    combined_score
+from pages.gt_creation.utils import (
+    create_storage_from_session,
+    load_events,
+    discover_days,
+    load_image,
+    load_event_embedding,
+    merge_gt
 )
 
-# ============================================================
-# STORAGE
-# ============================================================
-def create_storage_from_session():
-    cfg = st.session_state["runtime_config"]
-    return MinioBackend(
-        endpoint=cfg["MINIO_ENDPOINT"],
-        access_key=cfg["MINIO_ACCESS_KEY"],
-        secret_key=cfg["MINIO_SECRET_KEY"],
-        bucket=cfg["MINIO_BUCKET"],
-        secure=cfg["MINIO_SECURE"],
-    )
+from ground_truth import combined_score
 
-# ============================================================
-# IMAGE
-# ============================================================
-def load_image(storage, key):
-    try:
-        if not key:
-            return None
-        img_bytes = storage.get_object(key)
-        return Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    except:
-        return None
-
-# ============================================================
-# DATA
-# ============================================================
-def discover_days(storage):
-    days = set()
-    for key in storage.list_objects("enriched_events/"):
-        parts = key.split("/")
-        if len(parts) < 4:
-            continue
-        try:
-            days.add(date(int(parts[1]), int(parts[2]), int(parts[3])))
-        except:
-            continue
-    return sorted(days)
-
-
-def load_events(storage, day):
-    rows = []
-
-    for key in storage.list_objects(f"enriched_events/{day}"):
-        try:
-            data = json.loads(storage.get_object(key))
-            data["obj_key"] = key
-            rows.append(data)
-        except:
-            continue
-
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
-
-    df["start_datetime"] = pd.to_datetime(df["start_timestamp_utc"], errors="coerce")
-
-    df["gt_vehicle_id"] = df.apply(
-        lambda x: (x.get("ground_truth") or {}).get("gt_vehicle_id"),
-        axis=1
-    )
-
-    df["is_assigned"] = df["gt_vehicle_id"].notna()
-
-    return df
-
-
-def load_event_embedding(storage, event):
-    emb = event.get("embedding")
-    if not isinstance(emb, dict) or not emb:
-        return None
-
-    try:
-        emb_info = next(iter(emb.values()))
-        return load_embedding(storage, emb_info)
-    except:
-        return None
 
 # ============================================================
 # STATE
@@ -102,54 +24,6 @@ def init_state():
 
     if "selected_candidate_id" not in st.session_state:
         st.session_state.selected_candidate_id = None
-
-
-# ============================================================
-# GT RESOLVE
-# ============================================================
-def resolve_gt(row):
-    return (row.get("ground_truth") or {}).get("gt_vehicle_id")
-
-
-# ============================================================
-# GT UNION MERGE (CORE FIX)
-# ============================================================
-def merge_gt(storage, df, query_row, cand_row):
-    query_gt = resolve_gt(query_row)
-    cand_gt = resolve_gt(cand_row)
-
-    # --------------------------------------------------------
-    # CASE 1: both unassigned → create new GT
-    # --------------------------------------------------------
-    if not query_gt and not cand_gt:
-        new_gt = create_new_gt_id()
-        assign_event_to_gt(storage, query_row["obj_key"], new_gt)
-        assign_event_to_gt(storage, cand_row["obj_key"], new_gt)
-        return
-
-    # --------------------------------------------------------
-    # CASE 2: query has GT, candidate doesn't
-    # --------------------------------------------------------
-    if query_gt and not cand_gt:
-        assign_event_to_gt(storage, cand_row["obj_key"], query_gt)
-        return
-
-    # --------------------------------------------------------
-    # CASE 3: candidate has GT, query doesn't
-    # --------------------------------------------------------
-    if cand_gt and not query_gt:
-        assign_event_to_gt(storage, query_row["obj_key"], cand_gt)
-        return
-
-    # --------------------------------------------------------
-    # CASE 4: both have GT → MERGE CLUSTERS
-    # --------------------------------------------------------
-    if query_gt and cand_gt and query_gt != cand_gt:
-
-        for _, r in df.iterrows():
-            r_gt = resolve_gt(r)
-            if r_gt == cand_gt:
-                assign_event_to_gt(storage, r["obj_key"], query_gt)
 
 
 # ============================================================
@@ -203,6 +77,11 @@ def main():
     # LOAD DATA
     # ============================================================
     days = discover_days(storage)
+
+    if not days:
+        st.warning("No data")
+        return
+
     selected_date = st.date_input("Select date", value=max(days))
 
     df = load_events(storage, selected_date.strftime("%Y/%m/%d"))
@@ -223,17 +102,19 @@ def main():
     st.header("Step 1 — Select Event")
 
     event_cards = []
+
     for _, row in unassigned.iterrows():
         lpr = row.get("LPR") or {}
+        rep = row.get("representative") or {}
 
-        img = load_image(storage, row["representative"]["image_path"])
+        img = load_image(storage, rep.get("image_path"))
 
         event_cards.append({
             "event_id": row["vehicle_event_id"],
             "img": img,
             "labels": [
                 row["start_datetime"].strftime("%H:%M:%S"),
-                f"Cam: {row['camera_id']}",
+                f"Cam: {row.get('camera_id')}",
                 f"Plate: {lpr.get('plate')}",
             ]
         })
@@ -246,10 +127,12 @@ def main():
     query = df[df["vehicle_event_id"] == st.session_state.selected_event_id].iloc[0]
     query_vec = load_event_embedding(storage, query)
 
-    q_img = load_image(storage, query["representative"]["image_path"])
+    q_img = load_image(storage, query["representative"].get("image_path"))
 
     st.subheader("Query Event")
-    st.image(q_img, use_container_width=True)
+
+    if q_img:
+        st.image(q_img, use_container_width=True)
 
     # ============================================================
     # STEP 2: CANDIDATES
@@ -268,7 +151,10 @@ def main():
 
         score, ts, ls, es = combined_score(query, row, query_vec, vec2)
 
-        img = load_image(storage, row["representative"]["image_path"])
+        rep = row.get("representative") or {}
+        lpr = row.get("LPR") or {}
+
+        img = load_image(storage, rep.get("image_path"))
 
         candidates.append({
             "event_id": row["vehicle_event_id"],
@@ -277,7 +163,7 @@ def main():
             "labels": [
                 f"Overall Score:{score:.3f}",
                 f"Embedding Score:{es:.3f}",
-                f"Plate:{(row.get('LPR') or {}).get('plate')}"
+                f"Plate:{lpr.get('plate')}"
             ]
         })
 
@@ -290,11 +176,12 @@ def main():
     # ============================================================
     if st.session_state.selected_candidate_id:
 
-        cand = df[df["vehicle_event_id"] == st.session_state.selected_candidate_id].iloc[0]
+        cand = df[
+            df["vehicle_event_id"] == st.session_state.selected_candidate_id
+        ].iloc[0]
 
         merge_gt(storage, df, query, cand)
 
-        # reset workflow
         st.session_state.selected_event_id = None
         st.session_state.selected_candidate_id = None
 

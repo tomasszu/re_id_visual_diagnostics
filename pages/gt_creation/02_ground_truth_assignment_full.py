@@ -95,16 +95,25 @@ def load_events(storage, day):
         except:
             continue
 
+    if not rows:
+        return pd.DataFrame()
+
     df = pd.DataFrame(rows)
-    if df.empty:
-        return df
 
-    df["start_datetime"] = pd.to_datetime(df["start_timestamp_utc"], errors="coerce")
-
-    df["gt_vehicle_id"] = df.apply(
-        lambda x: (x.get("ground_truth") or {}).get("gt_vehicle_id"),
-        axis=1
+    df["start_datetime"] = pd.to_datetime(
+        df["start_timestamp_utc"],
+        errors="coerce"
     )
+
+    # ================= FIX: robust GT extraction =================
+    if "ground_truth" not in df.columns:
+        df["gt_vehicle_id"] = None
+    else:
+        gt_col = df["ground_truth"]
+        df["gt_vehicle_id"] = [
+            gt.get("gt_vehicle_id") if isinstance(gt, dict) else None
+            for gt in gt_col
+        ]
 
     df["is_assigned"] = df["gt_vehicle_id"].notna()
 
@@ -199,9 +208,39 @@ def main():
         st.error("Missing embedding")
         return
 
-# ============================================================
-# CANDIDATES
-# ============================================================
+    # ============================================================
+    # BULK INITIALIZATION
+    # ============================================================
+    st.subheader("Bulk Initialization")
+
+    if st.button("Bulk Initialize GT for vehicles with >1 events"):
+
+        grouped = unassigned.groupby("vehicle_id")
+
+        created = 0
+
+        for vid, group in grouped:
+            if len(group) < 2:
+                continue
+
+            new_gt = create_new_gt_id()
+
+            for _, row in group.iterrows():
+                assign_event_to_gt(storage, row["obj_key"], new_gt)
+
+            created += 1
+
+        st.success(f"Created {created} GT IDs")
+        st.cache_data.clear()
+        st.rerun()
+
+    if unassigned.empty:
+        st.success("All assigned")
+        return
+
+    # ============================================================
+    # CANDIDATES
+    # ============================================================
     st.header("Suggestions")
 
     candidates = []
@@ -235,13 +274,13 @@ def main():
     st.dataframe(
         cand_df,
         column_config={
-            "preview": st.column_config.ImageColumn("preview")  # ✅ SAME AS UNASSIGNED
+            "preview": st.column_config.ImageColumn("preview")
         },
         use_container_width=True
     )
 
     # ============================================================
-    # STABLE COMPARISON (NO INDEX COUPLING)
+    # VISUAL COMPARISON
     # ============================================================
     st.subheader("Visual Comparison")
 
@@ -275,14 +314,12 @@ def main():
 
     gt_options = sorted(df["gt_vehicle_id"].dropna().unique())
 
-    # get GT of currently selected candidate
     selected_cand_row = df[df["vehicle_event_id"] == selected_cand_id]
     selected_cand_gt = (
         selected_cand_row.iloc[0].get("gt_vehicle_id")
         if not selected_cand_row.empty else None
     )
 
-    # build display labels
     gt_display = []
     for gt in gt_options:
         if selected_cand_gt and gt == selected_cand_gt:
@@ -293,19 +330,23 @@ def main():
     col1, col2 = st.columns(2)
 
     with col1:
-        gt_choice = st.selectbox("GT", gt_display)
+        if gt_display:
+            gt_choice = st.selectbox("GT", gt_display)
 
-        # strip annotation safely
-        selected_gt = gt_choice.split("  ←")[0]
+            selected_gt = gt_choice.split("  ←")[0]
 
-        if st.button("Assign"):
-            assign_event_to_gt(storage, query["obj_key"], selected_gt)
-            st.rerun()
+            if st.button("Assign"):
+                assign_event_to_gt(storage, query["obj_key"], selected_gt)
+                st.cache_data.clear()
+                st.rerun()
+        else:
+            st.info("No existing GT IDs yet")
 
     with col2:
         if st.button("Assign NEW"):
             new_id = create_new_gt_id()
             assign_event_to_gt(storage, query["obj_key"], new_id)
+            st.cache_data.clear()
             st.rerun()
 
 

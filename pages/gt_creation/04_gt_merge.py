@@ -13,6 +13,20 @@ from ground_truth import assign_event_to_gt
 
 
 # ============================================================
+# SAFE HELPERS
+# ============================================================
+def safe_dict(x):
+    return x if isinstance(x, dict) else {}
+
+
+def extract_gt(row):
+    gt = row.get("ground_truth")
+    if isinstance(gt, dict):
+        return gt.get("gt_vehicle_id")
+    return None
+
+
+# ============================================================
 # STORAGE
 # ============================================================
 def create_storage_from_session():
@@ -62,12 +76,27 @@ def load_events(storage, day):
     if df.empty:
         return df
 
+    # ---------------- NORMALIZE ----------------
+    if "ground_truth" in df.columns:
+        df["ground_truth"] = df["ground_truth"].apply(safe_dict)
+    else:
+        df["ground_truth"] = [{}] * len(df)
+
+    if "LPR" in df.columns:
+        df["LPR"] = df["LPR"].apply(safe_dict)
+    else:
+        df["LPR"] = [{}] * len(df)
+
+    if "representative" in df.columns:
+        df["representative"] = df["representative"].apply(safe_dict)
+    else:
+        df["representative"] = [{}] * len(df)
+
+    # ---------------- TIME ----------------
     df["start_datetime"] = pd.to_datetime(df["start_timestamp_utc"], errors="coerce")
 
-    df["gt_vehicle_id"] = df.apply(
-        lambda x: (x.get("ground_truth") or {}).get("gt_vehicle_id"),
-        axis=1
-    )
+    # ---------------- GT ----------------
+    df["gt_vehicle_id"] = df.apply(extract_gt, axis=1)
 
     return df[df["gt_vehicle_id"].notna()]
 
@@ -116,21 +145,24 @@ def build_clusters(df, storage):
             if vec is not None:
                 embeddings.append(vec)
 
-            lpr = row.get("LPR") or {}
-            if lpr.get("plate"):
-                plates.append(lpr["plate"])
+            lpr = row["LPR"]
+            plate = lpr.get("plate")
+            if plate:
+                plates.append(plate)
 
             times.append(row["start_datetime"])
 
             if sample_img is None:
-                rep = row.get("representative") or {}
+                rep = row["representative"]
                 sample_img = load_image(storage, rep.get("image_path"))
 
         if not embeddings:
             continue
 
         emb_mean = np.mean(embeddings, axis=0)
-        emb_mean = emb_mean / np.linalg.norm(emb_mean)
+        norm = np.linalg.norm(emb_mean)
+        if norm > 0:
+            emb_mean = emb_mean / norm
 
         dominant_plate = max(set(plates), key=plates.count) if plates else None
 
@@ -155,9 +187,8 @@ def cluster_score(a, b):
 
     plate_score = 1.0 if a["plate"] and a["plate"] == b["plate"] else 0.0
 
-    # time gap penalty (seconds)
     gap = abs((a["time_max"] - b["time_min"]).total_seconds())
-    time_score = np.exp(-gap / 3600.0)  # 1h decay
+    time_score = np.exp(-gap / 3600.0)
 
     return (
         0.7 * emb_sim +
@@ -211,7 +242,6 @@ def main():
     st.header("Step 1 — Select Base GT")
 
     gt_ids = list(clusters.keys())
-
     selected_gt = st.selectbox("GT cluster", gt_ids)
 
     base = clusters[selected_gt]
@@ -245,15 +275,10 @@ def main():
             "plate_val": c["plate"]
         })
 
-    # sorting controls
-    sort_by = st.selectbox(
-        "Sort by",
-        ["score", "emb", "plate", "time"]
-    )
+    sort_by = st.selectbox("Sort by", ["score", "emb", "plate", "time"])
 
     candidates = sorted(candidates, key=lambda x: x[sort_by], reverse=True)
 
-    # ---------------- GRID ----------------
     cols = st.columns(4)
 
     for i, c in enumerate(candidates[:20]):
