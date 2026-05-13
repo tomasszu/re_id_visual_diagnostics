@@ -16,6 +16,15 @@ def extract_gt(row):
         return gt.get("gt_vehicle_id")
     return None
 
+# ============================================================
+# NORMALIZATION
+# ============================================================
+def ensure_dict_column(df, column_name):
+    if column_name in df.columns:
+        df[column_name] = df[column_name].apply(safe_dict)
+    else:
+        df[column_name] = [{} for _ in range(len(df))]
+
 
 # ============================================================
 # DISCOVERY
@@ -57,9 +66,9 @@ def load_events(storage, day):
     df = pd.DataFrame(rows)
 
     # ---------------- NORMALIZE ----------------
-    df["ground_truth"] = df.get("ground_truth", [{}] * len(df)).apply(safe_dict)
-    df["LPR"] = df.get("LPR", [{}] * len(df)).apply(safe_dict)
-    df["representative"] = df.get("representative", [{}] * len(df)).apply(safe_dict)
+    ensure_dict_column(df, "ground_truth")
+    ensure_dict_column(df, "LPR")
+    ensure_dict_column(df, "representative")
 
     # ---------------- TIME ----------------
     df["start_datetime"] = pd.to_datetime(
